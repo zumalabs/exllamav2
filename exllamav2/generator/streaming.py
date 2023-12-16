@@ -267,9 +267,18 @@ class ExLlamaV2StreamingGenerator(ExLlamaV2BaseGenerator):
             self._gen_begin(in_tokens, gen_settings)
             return
 
-        reuse = 0
-        while reuse < self.sequence_ids.shape[-1] and reuse < in_tokens.shape[-1] and self.sequence_ids[0, reuse] == in_tokens[0, reuse]:
-            reuse += 1
+        # reuse = 0
+        # while reuse < self.sequence_ids.shape[-1] and reuse < in_tokens.shape[-1] and self.sequence_ids[0, reuse] == in_tokens[0, reuse]:
+        #     reuse += 1
+
+        min_length = min(self.sequence_ids.shape[-1], in_tokens.shape[-1])
+        indices = torch.nonzero(
+            ~torch.eq(self.sequence_ids[0, :min_length], in_tokens[0, :min_length])
+        )
+        if len(indices) > 0:
+            reuse = indices[0].item()
+        else:
+            reuse = min_length
 
         if reuse < 2:
             self._gen_begin(in_tokens, gen_settings)
