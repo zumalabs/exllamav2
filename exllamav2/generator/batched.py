@@ -15,6 +15,7 @@ from exllamav2.model import ExLlamaV2
 
 import torch
 import random
+import traceback
 
 class ExLlamaV2BatchedModel(ExLlamaV2):
     def __init__(self, config: ExLlamaV2Config, max_batches, lazy_load=False):
@@ -32,29 +33,43 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
     
     async def _runner(self):
         while True:
-            tasks = []
-            tasks.append(await self._input_queue.get())
-            while not self._input_queue.empty():
+            try:
+                tasks = []
                 tasks.append(await self._input_queue.get())
-            
-            batch_ids = []
-            inputs = []
-            caches = []
-            for batch_id, input_ids, cache, preprocess_only in tasks:
-                print(batch_ids, preprocess_only)
-                if preprocess_only:
-                    self._output_queues[batch_id].put_nowait(
-                        super().forward(input_ids, cache, preprocess_only=True)
-                    )
-                else:
-                    batch_ids.append(batch_id)
-                    inputs.append(input_ids)
-                    caches.append(cache)
+                while not self._input_queue.empty():
+                    tasks.append(await self._input_queue.get())
 
-            if inputs:
-                logits = super().forward(torch.cat(inputs, dim = 0), caches)
-                for idx, batch_id in enumerate(batch_ids):
-                    self._output_queues[batch_id].put_nowait(logits[idx:idx+1, :, :])
+                pre_ids = []
+                pre_inputs = []
+                pre_caches = []
+                forward_ids = []
+                forward_inputs = []
+                forward_caches = []
+                for batch_id, input_ids, cache, preprocess_only in tasks:
+                    if preprocess_only:
+                        pre_ids.append(batch_id)
+                        pre_inputs.append(input_ids)
+                        pre_caches.append(cache)
+                    else:
+                        forward_ids.append(batch_id)
+                        forward_inputs.append(input_ids)
+                        forward_caches.append(cache)
+
+                if pre_inputs:
+                    # super().forward(torch.cat(pre_inputs, dim = 0), pre_caches, preprocess_only=True)
+                    for idx, batch_id in enumerate(pre_ids):
+                        super().forward(pre_inputs[idx], pre_caches[idx], preprocess_only=True)
+                        await self._output_queues[batch_id].put(True)
+
+                if forward_inputs:
+                    # print("batch size", len(forward_inputs))
+                    logits = super().forward(torch.cat(forward_inputs, dim = 0), forward_caches)
+                    for idx, batch_id in enumerate(forward_ids):
+                        await self._output_queues[batch_id].put(logits[idx:idx+1, :, :])
+
+                await asyncio.sleep(0.001)
+            except Exception as e:
+                print(traceback.format_exc())
 
 
     async def forward(self, input_ids, cache, preprocess_only=False, **kwargs):
