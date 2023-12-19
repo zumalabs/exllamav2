@@ -78,7 +78,7 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
 
     def forward(self, input_ids, cache, preprocess_only=False, **kwargs):
         batch_id = uuid.uuid4()
-        self._locks[batch_id] = queue.Lock()
+        self._locks[batch_id] = threading.Lock()
         self._locks[batch_id].acquire()
         self._inputs[batch_id] = (input_ids, cache, preprocess_only)
         self._queue.put_nowait(batch_id)
