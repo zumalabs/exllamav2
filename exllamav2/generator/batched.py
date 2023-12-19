@@ -66,8 +66,6 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
                     logits = super().forward(torch.cat(forward_inputs, dim = 0), forward_caches)
                     for idx, batch_id in enumerate(forward_ids):
                         await self._output_queues[batch_id].put(logits[idx:idx+1, :, :])
-
-                await asyncio.sleep(0.001)
             except Exception as e:
                 print(traceback.format_exc())
 
