@@ -33,7 +33,7 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
     async def _runner(self):
         while True:
             tasks = []
-            tasks.append(await self._batch_ids.get())
+            tasks.append(await self._input_queue.get())
             while not self._input_queue.empty():
                 tasks.append(self._input_queue.get())
             
@@ -43,20 +43,20 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
             for batch_id, input_ids, cache, preprocess_only in tasks:
                 print(batch_ids, preprocess_only)
                 if preprocess_only:
-                    self._output_queues[batch_id].put_nowait(super().forward(input_ids, cache, preprocess_only))
+                    self._output_queues[batch_id].put_nowait(
+                        super().forward(input_ids, cache, preprocess_only=preprocess_only)
+                    )
                 else:
                     batch_ids.append(batch_id)
                     inputs.append(input_ids)
                     caches.append(cache)
 
-            print("starting forward")
-            logits = super().forward(torch.cat(inputs, dim = 0), caches, preprocess_only)
-            print("forward done")
+            logits = super().forward(torch.cat(inputs, dim = 0), caches, preprocess_only=preprocess_only)
             for idx, batch_id in enumerate(batch_ids):
                 self._output_queues[batch_id].put_nowait(logits[idx:idx+1, :, :])
 
 
-    async def forward(self, input_ids, cache, preprocess_only=False):
+    async def forward(self, input_ids, cache, preprocess_only=False, **kwargs):
         if not self._task:
             self._task = asyncio.ensure_future(self._runner())
         
