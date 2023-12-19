@@ -21,8 +21,7 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
         super().__init__(config, lazy_load)
         self.max_batches = max_batches
 
-        self._loop = asyncio.get_event_loop()
-        self._task = asyncio.ensure_future(self._runner())
+        self._task = None
 
         self._batch_ids = asyncio.Queue()
         for i in range(max_batches):
@@ -34,27 +33,33 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
     async def _runner(self):
         while True:
             tasks = []
-            tasks.append(self._batch_ids.get())
+            tasks.append(await self._batch_ids.get())
             while not self._input_queue.empty():
                 tasks.append(self._input_queue.get())
             
             batch_ids = []
-            input_ids = []
+            inputs = []
             caches = []
             for batch_id, input_ids, cache, preprocess_only in tasks:
+                print(batch_ids, preprocess_only)
                 if preprocess_only:
                     self._output_queues[batch_id].put_nowait(super().forward(input_ids, cache, preprocess_only))
                 else:
                     batch_ids.append(batch_id)
-                    input_ids.append(input_ids)
+                    inputs.append(input_ids)
                     caches.append(cache)
 
-            logits = super().forward(torch.cat(input_ids, dim = 0), caches, preprocess_only)
+            print("starting forward")
+            logits = super().forward(torch.cat(inputs, dim = 0), caches, preprocess_only)
+            print("forward done")
             for idx, batch_id in enumerate(batch_ids):
                 self._output_queues[batch_id].put_nowait(logits[idx:idx+1, :, :])
 
 
     async def forward(self, input_ids, cache, preprocess_only=False):
+        if not self._task:
+            self._task = asyncio.ensure_future(self._runner())
+        
         batch_id = await self._batch_ids.get()
         self._input_queue.put_nowait((batch_id, input_ids, cache, preprocess_only))
         logits = await self._output_queues[batch_id].get()
@@ -122,7 +127,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
             else: raise ValueError("Unsupported type in stop_conditions")
     
     
-    def begin_stream(self, input_ids: torch.Tensor, gen_settings: ExLlamaV2Sampler.Settings, token_healing = False, loras = None):
+    async def begin_stream(self, input_ids: torch.Tensor, gen_settings: ExLlamaV2Sampler.Settings, token_healing = False, loras = None):
 
         # Accept LoRA or list of LoRAs
         if loras is not None and isinstance(loras, ExLlamaV2Lora): loras = [loras]
@@ -133,7 +138,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
         self.expect_utf8 = 0
         self.held_tokens = self.no_tokens
         self.settings = gen_settings
-        self._gen_begin_reuse(input_ids, gen_settings)
+        await self._gen_begin_reuse(input_ids, gen_settings)
 
         self.heal_next_token = (token_healing and self.sequence_ids.shape[-1] >= 2)
 
@@ -312,7 +317,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
     async def _gen_begin_reuse(self, in_tokens, gen_settings):
 
         if self.sequence_ids is None or self.cache.current_seq_len == 0:
-            self._gen_begin(in_tokens, gen_settings)
+            await self._gen_begin(in_tokens, gen_settings)
             return
 
         # reuse = 0
