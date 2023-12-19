@@ -370,7 +370,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
 
         if self.draft_model is None:
 
-            logits = await self.model.forward(self.sequence_ids[:, -1:], self.cache, loras = self.active_loras).float().cpu()
+            logits = (await self.model.forward(self.sequence_ids[:, -1:], self.cache, loras = self.active_loras)).float().cpu()
             token, _, eos = ExLlamaV2Sampler.sample(logits, gen_settings, self.sequence_ids, random.random(), self.tokenizer, prefix_token)
 
         else:
