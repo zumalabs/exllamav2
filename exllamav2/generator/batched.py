@@ -44,16 +44,17 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
                 print(batch_ids, preprocess_only)
                 if preprocess_only:
                     self._output_queues[batch_id].put_nowait(
-                        super().forward(input_ids, cache, preprocess_only=preprocess_only)
+                        super().forward(input_ids, cache, preprocess_only=True)
                     )
                 else:
                     batch_ids.append(batch_id)
                     inputs.append(input_ids)
                     caches.append(cache)
 
-            logits = super().forward(torch.cat(inputs, dim = 0), caches, preprocess_only=preprocess_only)
-            for idx, batch_id in enumerate(batch_ids):
-                self._output_queues[batch_id].put_nowait(logits[idx:idx+1, :, :])
+            if inputs:
+                logits = super().forward(torch.cat(inputs, dim = 0), caches)
+                for idx, batch_id in enumerate(batch_ids):
+                    self._output_queues[batch_id].put_nowait(logits[idx:idx+1, :, :])
 
 
     async def forward(self, input_ids, cache, preprocess_only=False, **kwargs):
