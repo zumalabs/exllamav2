@@ -31,7 +31,7 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
         self._input_queue = asyncio.Queue()
         self._output_queues = [asyncio.Queue() for _ in range(max_batches)]
     
-    async def _runner(self, input_ids, cache, input_mask, preprocess_only):
+    async def _runner(self):
         while True:
             tasks = []
             tasks.append(self._batch_ids.get())
