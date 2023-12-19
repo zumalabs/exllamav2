@@ -140,7 +140,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
 
     # Get the next chunk of text in the stream. Returns eos if stop condition has been met but does not count tokens
 
-    def stream(self) -> (str, bool, torch.Tensor):
+    async def stream(self) -> (str, bool, torch.Tensor):
 
         # Token healing
 
@@ -162,7 +162,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
 
             # Regenerate the last token again, with prefix
 
-            healed_token, eos = self._gen_single_token(self.settings, prefix_token = last_token)
+            healed_token, eos = await self._gen_single_token(self.settings, prefix_token = last_token)
             new_tail = self.tokenizer.decode(self.sequence_ids[:, -self.tail_decode_tokens:])[0]
             self.held_text += new_tail[len(old_tail):]
 
@@ -188,7 +188,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
 
         # Generate a single token and append to the sequence
 
-        next_token, eos = self._gen_single_token(self.settings)
+        next_token, eos = await self._gen_single_token(self.settings)
 
         # End immediately if it was a stop token
 
