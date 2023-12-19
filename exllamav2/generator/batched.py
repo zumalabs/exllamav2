@@ -35,7 +35,7 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
             tasks = []
             tasks.append(await self._input_queue.get())
             while not self._input_queue.empty():
-                tasks.append(self._input_queue.get())
+                tasks.append(await self._input_queue.get())
             
             batch_ids = []
             inputs = []
