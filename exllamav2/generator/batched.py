@@ -6,7 +6,7 @@ from exllamav2 import (
     ExLlamaV2Tokenizer,
     ExLlamaV2Lora
 )
-from exllamav2.exllamav2.config import ExLlamaV2Config
+from exllamav2.config import ExLlamaV2Config
 from exllamav2.generator import (
     ExLlamaV2Sampler,
     ExLlamaV2BaseGenerator
