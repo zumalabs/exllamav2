@@ -294,22 +294,22 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
             return self.no_tokens, ""
 
 
-    def _gen_begin(self, in_tokens, gen_settings):
+    async def _gen_begin(self, in_tokens, gen_settings):
 
         self.sequence_ids = in_tokens.clone()
         self.cache.current_seq_len = 0
-        self.model.forward(self.sequence_ids[:, :-1], self.cache, preprocess_only = True, loras = self.active_loras)
+        await self.model.forward(self.sequence_ids[:, :-1], self.cache, preprocess_only = True)
 
         if self.draft_model is not None:
             self.draft_cache.current_seq_len = 0
-            self.draft_model.forward(self.sequence_ids[:, :-1], self.draft_cache, preprocess_only = True)
+            await self.draft_model.forward(self.sequence_ids[:, :-1], self.draft_cache, preprocess_only = True)
             self.future_logits = None
             self.future_tokens = None
 
         self.first_token = True
 
 
-    def _gen_begin_reuse(self, in_tokens, gen_settings):
+    async def _gen_begin_reuse(self, in_tokens, gen_settings):
 
         if self.sequence_ids is None or self.cache.current_seq_len == 0:
             self._gen_begin(in_tokens, gen_settings)
@@ -329,7 +329,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
             reuse = min_length
 
         if reuse < 2:
-            self._gen_begin(in_tokens, gen_settings)
+            await self._gen_begin(in_tokens, gen_settings)
             return
 
         self.cache.current_seq_len = reuse - 1
@@ -337,47 +337,47 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
             self.draft_cache.current_seq_len = reuse - 1
         self.sequence_ids = in_tokens[:, :reuse]
 
-        if reuse < in_tokens.shape[-1]: self._gen_feed_tokens(in_tokens[:, reuse:], gen_settings)
+        if reuse < in_tokens.shape[-1]: await self._gen_feed_tokens(in_tokens[:, reuse:], gen_settings)
 
         if self.draft_model is not None:
             self.future_logits = None
             self.future_tokens = None
 
 
-    def _gen_feed_tokens(self, in_tokens, gen_settings):
+    async def _gen_feed_tokens(self, in_tokens, gen_settings):
 
         if self.sequence_ids is None:
-            self._gen_begin(in_tokens, gen_settings)
+            await self._gen_begin(in_tokens, gen_settings)
             return
 
         start = self.cache.current_seq_len
         self.sequence_ids = torch.cat((self.sequence_ids, in_tokens), dim = 1)
 
-        self.model.forward(self.sequence_ids[:, start : -1], self.cache, preprocess_only = True, loras = self.active_loras)
+        await self.model.forward(self.sequence_ids[:, start : -1], self.cache, preprocess_only = True)
 
         if self.draft_model is not None:
-            self.draft_model.forward(self.sequence_ids[:, start: -1], self.draft_cache, preprocess_only = True)
+            await self.draft_model.forward(self.sequence_ids[:, start: -1], self.draft_cache, preprocess_only = True)
             self.future_logits = None
             self.future_tokens = None
 
 
-    def _gen_single_token(self, gen_settings, prefix_token = None):
+    async def _gen_single_token(self, gen_settings, prefix_token = None):
 
         if self.draft_model is None:
 
-            logits = self.model.forward(self.sequence_ids[:, -1:], self.cache, loras = self.active_loras).float().cpu()
+            logits = await self.model.forward(self.sequence_ids[:, -1:], self.cache, loras = self.active_loras).float().cpu()
             token, _, eos = ExLlamaV2Sampler.sample(logits, gen_settings, self.sequence_ids, random.random(), self.tokenizer, prefix_token)
 
         else:
 
-            token, eos = self._gen_single_token_speculative(gen_settings, prefix_token)
+            token, eos = await self._gen_single_token_speculative(gen_settings, prefix_token)
 
         self.sequence_ids = torch.cat([self.sequence_ids, token], dim = 1)
         gen_settings.feed_filters(token)
         return token, eos
 
 
-    def _gen_single_token_speculative(self, gen_settings, prefix_token = None):
+    async def _gen_single_token_speculative(self, gen_settings, prefix_token = None):
 
         if self.future_tokens is None:
 
@@ -389,7 +389,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
 
             for k in range(self.num_speculative_tokens):
 
-                logits = self.draft_model.forward(draft_sequence_ids[:, -1:], self.draft_cache).float().cpu()
+                logits = (await self.draft_model.forward(draft_sequence_ids[:, -1:], self.draft_cache)).float().cpu()
                 token, prob, _ = ExLlamaV2Sampler.sample(logits, draft_gen_settings, draft_sequence_ids, random.random(), self.tokenizer, prefix_token if k == 0 else None)
 
                 if prob < self.speculative_prob_threshold:
@@ -408,7 +408,7 @@ class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
             # Forward last sampled token plus draft through model
 
             self.future_tokens = draft_sequence_ids[:, -1 - num_drafted_tokens:]
-            self.future_logits = self.model.forward(self.future_tokens, self.cache, loras = self.active_loras).float().cpu()
+            self.future_logits = (await self.model.forward(self.future_tokens, self.cache, loras = self.active_loras)).float().cpu()
 
             # Rewind model cache
 
