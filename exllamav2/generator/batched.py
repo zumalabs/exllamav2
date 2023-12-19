@@ -17,27 +17,31 @@ import torch
 import random
 import traceback
 
+import uuid
+import threading
+import queue
+from datetime import datetime
+
 class ExLlamaV2BatchedModel(ExLlamaV2):
     def __init__(self, config: ExLlamaV2Config, max_batches, lazy_load=False):
         super().__init__(config, lazy_load)
         self.max_batches = max_batches
 
-        self._task = None
+        self._queue = queue.Queue()
+        self._locks = dict()
+        self._inputs = dict()
+        self._outputs = dict()
 
-        self._batch_ids = asyncio.Queue()
-        for i in range(max_batches):
-            self._batch_ids.put_nowait(i)
+        self._task = threading.Thread(target=self._runner, daemon=True)
+        self._task.start()
 
-        self._input_queue = asyncio.Queue()
-        self._output_queues = [asyncio.Queue() for _ in range(max_batches)]
-    
-    async def _runner(self):
+    def _runner(self):
         while True:
             try:
-                tasks = []
-                tasks.append(await self._input_queue.get())
-                while not self._input_queue.empty():
-                    tasks.append(await self._input_queue.get())
+                batch_ids = []
+                batch_ids.append(self._queue.get())
+                while not self._queue.empty():
+                    batch_ids.append(self._queue.get())
 
                 pre_ids = []
                 pre_inputs = []
@@ -45,7 +49,8 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
                 forward_ids = []
                 forward_inputs = []
                 forward_caches = []
-                for batch_id, input_ids, cache, preprocess_only in tasks:
+                for batch_id in batch_ids:
+                    input_ids, cache, preprocess_only = self._inputs[batch_id]
                     if preprocess_only:
                         pre_ids.append(batch_id)
                         pre_inputs.append(input_ids)
@@ -59,13 +64,68 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
                     # super().forward(torch.cat(pre_inputs, dim = 0), pre_caches, preprocess_only=True)
                     for idx, batch_id in enumerate(pre_ids):
                         super().forward(pre_inputs[idx], pre_caches[idx], preprocess_only=True)
-                        await self._output_queues[batch_id].put(True)
+                        self._outputs[batch_id] = True
+                        self._locks[batch_id].release()
 
                 if forward_inputs:
                     # print("batch size", len(forward_inputs))
                     logits = super().forward(torch.cat(forward_inputs, dim = 0), forward_caches)
                     for idx, batch_id in enumerate(forward_ids):
-                        await self._output_queues[batch_id].put(logits[idx:idx+1, :, :])
+                        self._outputs[batch_id] = logits[idx:idx+1, :, :]
+                        self._locks[batch_id].release()
+            except Exception as e:
+                print(traceback.format_exc())
+
+class ExLlamaV2BatchedModelAsync(ExLlamaV2):
+    def __init__(self, config: ExLlamaV2Config, max_batches, lazy_load=False):
+        super().__init__(config, lazy_load)
+        self.max_batches = max_batches
+
+        self._task = None
+
+        self._queue = asyncio.Queue()
+        self._locks = dict()
+        self._inputs = dict()
+        self._outputs = dict()
+    
+    async def _runner(self):
+        while True:
+            try:
+                batch_ids = []
+                batch_ids.append(await self._queue.get())
+                while not self._queue.empty():
+                    batch_ids.append(await self._queue.get())
+
+                pre_ids = []
+                pre_inputs = []
+                pre_caches = []
+                forward_ids = []
+                forward_inputs = []
+                forward_caches = []
+                for batch_id in batch_ids:
+                    input_ids, cache, preprocess_only = self._inputs[batch_id]
+                    if preprocess_only:
+                        pre_ids.append(batch_id)
+                        pre_inputs.append(input_ids)
+                        pre_caches.append(cache)
+                    else:
+                        forward_ids.append(batch_id)
+                        forward_inputs.append(input_ids)
+                        forward_caches.append(cache)
+
+                if pre_inputs:
+                    # super().forward(torch.cat(pre_inputs, dim = 0), pre_caches, preprocess_only=True)
+                    for idx, batch_id in enumerate(pre_ids):
+                        super().forward(pre_inputs[idx], pre_caches[idx], preprocess_only=True)
+                        self._outputs[batch_id] = True
+                        self._locks[batch_id].release()
+
+                if forward_inputs:
+                    # print("batch size", len(forward_inputs))
+                    logits = super().forward(torch.cat(forward_inputs, dim = 0), forward_caches)
+                    for idx, batch_id in enumerate(forward_ids):
+                        self._outputs[batch_id] = logits[idx:idx+1, :, :]
+                        self._locks[batch_id].release()
             except Exception as e:
                 print(traceback.format_exc())
 
@@ -74,13 +134,16 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
         if not self._task:
             self._task = asyncio.ensure_future(self._runner())
         
-        batch_id = await self._batch_ids.get()
-        self._input_queue.put_nowait((batch_id, input_ids, cache, preprocess_only))
-        logits = await self._output_queues[batch_id].get()
-        self._batch_ids.put_nowait(batch_id)
-        return logits
+        batch_id = uuid.uuid4()
+        self._locks[batch_id] = asyncio.Lock()
+        await self._locks[batch_id].acquire()
+        self._inputs[batch_id] = (input_ids, cache, preprocess_only)
+        self._queue.put_nowait(batch_id)
+        await self._locks[batch_id].acquire()
+        del self._locks[batch_id]
+        return self._outputs.pop(batch_id)
 
-class ExLlamaV2BatchedGenerator(ExLlamaV2BaseGenerator):
+class ExLlamaV2BatchedGeneratorAsync(ExLlamaV2BaseGenerator):
 
     tail_decode_tokens: int = 2
     
