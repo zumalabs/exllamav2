@@ -76,6 +76,16 @@ class ExLlamaV2BatchedModel(ExLlamaV2):
             except Exception as e:
                 print(traceback.format_exc())
 
+    def forward(self, input_ids, cache, preprocess_only=False, **kwargs):
+        batch_id = uuid.uuid4()
+        self._locks[batch_id] = queue.Lock()
+        self._locks[batch_id].acquire()
+        self._inputs[batch_id] = (input_ids, cache, preprocess_only)
+        self._queue.put_nowait(batch_id)
+        self._locks[batch_id].acquire()
+        del self._locks[batch_id]
+        return self._outputs.pop(batch_id)
+
 class ExLlamaV2BatchedModelAsync(ExLlamaV2):
     def __init__(self, config: ExLlamaV2Config, max_batches, lazy_load=False):
         super().__init__(config, lazy_load)
