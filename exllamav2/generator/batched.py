@@ -132,9 +132,13 @@ class ExLlamaV2BatchedModelAsync(ExLlamaV2):
 
                 if forward_inputs:
                     # print("batch size", len(forward_inputs))
-                    logits = super().forward(torch.cat(forward_inputs, dim = 0), forward_caches)
+                    # logits = super().forward(torch.cat(forward_inputs, dim = 0), forward_caches)
+                    # for idx, batch_id in enumerate(forward_ids):
+                    #     self._outputs[batch_id] = logits[idx:idx+1, :, :]
+                    #     self._locks[batch_id].release()
                     for idx, batch_id in enumerate(forward_ids):
-                        self._outputs[batch_id] = logits[idx:idx+1, :, :]
+                        super().forward(forward_inputs[idx], forward_caches[idx])
+                        self._outputs[batch_id] = super().forward(forward_inputs[idx], forward_caches[idx])
                         self._locks[batch_id].release()
             except Exception as e:
                 print(traceback.format_exc())
