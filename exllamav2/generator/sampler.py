@@ -14,6 +14,7 @@ class ExLlamaV2Sampler:
         temperature = 0.8
         top_k = 50
         top_p = 0.8
+        top_a = 0.0
         min_p = 0
         tfs = 0
         typical = 0
@@ -41,6 +42,7 @@ class ExLlamaV2Sampler:
             c.temperature = self.temperature
             c.top_k = self.top_k
             c.top_p = self.top_p
+            c.top_a = self.top_a
             c.min_p = self.min_p
             c.tfs = self.tfs
             c.typical = self.typical
@@ -97,8 +99,9 @@ class ExLlamaV2Sampler:
         assert prefix_token is None or prefix_token.shape == (batch_size, 1), "Prefix token list doesn't match batch shape"
         assert batch_size == 1 or len(settings.filters) == 0, "Filters not implemented for batch size > 1"
 
-        logits = logits.clone().squeeze(1)
-        logit_filter = torch.ones((batch_size, vocab_size), dtype = torch.bool)
+        logits = logits.squeeze(1)
+        logit_filter = torch.empty((batch_size, vocab_size), dtype = torch.bool)
+        ext_c.fast_fill_cpu_ones_bool(logit_filter)
 
         # Repetition penalty
 
@@ -112,7 +115,9 @@ class ExLlamaV2Sampler:
 
         # Token bias
 
-        if settings.token_bias is not None: logits += settings.token_bias
+        if settings.token_bias is not None:
+            # logits = logits + settings.token_bias
+            ext_c.fast_fadd_cpu(logits, settings.token_bias)
 
         # Evaluate filters
 
@@ -168,6 +173,7 @@ class ExLlamaV2Sampler:
                                1.0 if settings.temperature_last else settings.temperature,
                                settings.top_k,
                                settings.top_p,
+                               settings.top_a,
                                settings.min_p,
                                settings.tfs,
                                settings.typical,

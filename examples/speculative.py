@@ -18,8 +18,9 @@ import time
 
 # Initialize model and draft model
 
-model_directory = "/mnt/str/models/_exl2/codellama-34b-instruct-exl2/4.0bpw"
-draft_directory = "/mnt/str/models/_exl2/tinyllama-1b-ckpt503-exl2/3.5bpw"
+# model_directory = "/mnt/str/models/codellama-34b-instruct-exl2/4.0bpw"
+model_directory = "/mnt/str/models/_gptq/TheBloke_Phine-CodeLlama-34B-v2-GPTQ/"
+draft_directory = "/mnt/str/models/tinyllama-1b-ckpt503-exl2/3.5bpw"
 
 model_config = ExLlamaV2Config()
 model_config.model_dir = model_directory
@@ -100,6 +101,7 @@ gen_settings = ExLlamaV2Sampler.Settings()
 gen_settings.temperature = 0.6
 gen_settings.top_k = 50
 gen_settings.top_p = 0.6
+gen_settings.top_a = 0.0
 gen_settings.token_repetition_penalty = 1.0
 gen_settings.disallow_tokens(tokenizer, [tokenizer.eos_token_id])
 

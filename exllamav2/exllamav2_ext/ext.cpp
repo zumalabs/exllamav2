@@ -654,7 +654,7 @@ uintptr_t make_q_moe_mlp
     std::vector<QMatrix*> qm_w2;
     std::vector<QMatrix*> qm_w3;
 
-    for (int i = 0; i < w1.size(); ++i)
+    for (int i = 0; i < (int)w1.size(); ++i)
     {
         qm_w1.push_back(reinterpret_cast<QMatrix*> (w1[i]));
         qm_w2.push_back(reinterpret_cast<QMatrix*> (w2[i]));
@@ -725,6 +725,59 @@ void q_moe_mlp_forward_
 //        loras_temp.device().is_meta() ? NULL : (half*) loras_temp.data_ptr()
     );
 }
+
+//int q_moe_mlp_set_loras
+//(
+//    uintptr_t q_moe_mlp,
+//    std::vector<std::unordered_map<uintptr_t, torch::Tensor>>& w1_lora_a,
+//    std::vector<std::unordered_map<uintptr_t, torch::Tensor>>& w1_lora_b,
+//    std::vector<std::unordered_map<uintptr_t, torch::Tensor>>& w2_lora_a,
+//    std::vector<std::unordered_map<uintptr_t, torch::Tensor>>& w2_lora_b,
+//    std::vector<std::unordered_map<uintptr_t, torch::Tensor>>& w3_lora_a,
+//    std::vector<std::unordered_map<uintptr_t, torch::Tensor>>& w3_lora_b
+//)
+//{
+//    QMoEMLP* moe_mlp = reinterpret_cast<QMoEMLP*> (q_moe_mlp);
+//
+//    int max_rank = 0;
+//
+//    for (int i = 0; i < moe_mlp->num_experts; ++i)
+//    {
+//        moe_mlp->w1_lora[i].clear();
+//        moe_mlp->w2_lora[i].clear();
+//        moe_mlp->w3_lora[i].clear();
+//
+//        for (const auto& pair : w1_lora_a[i])
+//        {
+//            int rank = pair.second.size(-1);
+//            if (rank > max_rank) max_rank = rank;
+//            half* a = (half*) pair.second.data_ptr();
+//            half* b = (half*) w1_lora_b[i][pair.first].data_ptr();
+//            moe_mlp->w1_lora[i][pair.first] = std::make_tuple(a, b, rank);
+//        }
+//
+//        for (const auto& pair : w2_lora_a[i])
+//        {
+//            int rank = pair.second.size(-1);
+//            if (rank > max_rank) max_rank = rank;
+//            half* a = (half*) pair.second.data_ptr();
+//            half* b = (half*) w2_lora_b[i][pair.first].data_ptr();
+//            moe_mlp->w2_lora[i][pair.first] = std::make_tuple(a, b, rank);
+//        }
+//
+//        for (const auto& pair : w3_lora_a[i])
+//        {
+//            int rank = pair.second.size(-1);
+//            if (rank > max_rank) max_rank = rank;
+//            half* a = (half*) pair.second.data_ptr();
+//            half* b = (half*) w3_lora_b[i][pair.first].data_ptr();
+//            moe_mlp->w3_lora[i][pair.first] = std::make_tuple(a, b, rank);
+//        }
+//    }
+//
+//    return max_rank;
+//}
+
 
 // RoPE rotary positional embeddings, in-place
 
@@ -851,6 +904,7 @@ std::vector<float> sample_basic
     float temperature,
     int top_k,
     float top_p,
+    float top_a,
     float min_p,
     float tfs,
     float typical,
@@ -923,6 +977,12 @@ std::vector<float> sample_basic
         if (top_p > 0.0f && top_p < 1.0f)
         {
             num_candidates = top_p_cpu(num_candidates, temp_probs, temp_indices, top_p);
+            normalize_cpu(num_candidates, temp_probs);
+        }
+
+        if (top_a > 0.0f)
+        {
+            num_candidates = top_a_cpu(num_candidates, temp_probs, temp_indices, top_a);
             normalize_cpu(num_candidates, temp_probs);
         }
 
@@ -1131,6 +1191,34 @@ void gemm_half_half_half
     }
 }
 
+// Utility functions
+
+void fast_fill_cpu_ones_bool(torch::Tensor tensor)
+{
+    TORCH_CHECK_DTYPE(tensor, kBool);
+    memset(tensor.data_ptr(), 1, tensor.numel());
+}
+
+void fast_fadd_cpu(torch::Tensor a, torch::Tensor b)
+{
+    TORCH_CHECK_DTYPE(a, kFloat);
+    TORCH_CHECK_DTYPE(b, kFloat);
+    int n = a.numel();
+    int m = b.numel();
+    int bsz = n / m;
+    TORCH_CHECK(bsz * m == n, "a and b are incompatible sizes");
+
+    float* a_ptr = (float*) a.data_ptr();
+    float* b_ptr = (float*) b.data_ptr();
+
+    for (int i = 0; i < bsz; ++i)
+    {
+        float* b_ptr_ = b_ptr;
+        for (int j = 0; j < m; ++j)
+            *a_ptr++ += *b_ptr_++;
+    }
+}
+
 // Bindings
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
@@ -1149,6 +1237,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("q_mlp_forward_", &q_mlp_forward_, "q_mlp_forward_");
     m.def("q_mlp_set_loras", &q_mlp_set_loras, "q_mlp_set_loras");
     m.def("q_moe_mlp_forward_", &q_moe_mlp_forward_, "q_moe_mlp_forward_");
+//    m.def("q_moe_mlp_set_loras", &q_moe_mlp_set_loras, "q_moe_mlp_set_loras");
     m.def("make_q_attn", &make_q_attn, "make_q_attn");
     m.def("free_q_attn", &free_q_attn, "free_q_attn");
     m.def("q_attn_forward_1", &q_attn_forward_1, "q_attn_forward_1");
@@ -1165,6 +1254,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("fp16_to_fp8", &fp16_to_fp8, "fp16_to_fp8");
     m.def("fp8_to_fp16", &fp8_to_fp16, "fp8_to_fp16");
     m.def("gemm_half_half_half", &gemm_half_half_half, "gemm_half_half_half");
+    m.def("fast_fill_cpu_ones_bool", &fast_fill_cpu_ones_bool, "fast_fill_cpu_ones_bool");
+    m.def("fast_fadd_cpu", &fast_fadd_cpu, "fast_fadd_cpu");
 //    m.def("array_fp16_to_fp8_ref", &array_fp16_to_fp8_ref, "array_fp16_to_fp8_ref");
 //    m.def("array_fp8_to_fp16_ref", &array_fp8_to_fp16_ref, "array_fp8_to_fp16_ref");
 }
