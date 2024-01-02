@@ -42,10 +42,12 @@ class ExLlamaV2Config:
     vocab_size: int
     rotary_embedding_base: float = 10000.0      # Constant for all Llama models, nodified by .prepare() if scale_alpha_value != 1.0
     head_dim: int = 128                         # Constant for all Llama models, except 3b
-    num_experts: int = 1
-    num_experts_per_token: int = 1
+    num_experts: int = None
+    num_experts_per_token: int = None
 
     qkv_embed: bool = False
+
+    checkpoint_fused_mlp: bool = False
 
 
     def __init__(self):
@@ -89,6 +91,8 @@ class ExLlamaV2Config:
             layer_keys_llama_mlp = [["mlp.down_proj"],
                                     ["mlp.gate_proj"],
                                     ["mlp.up_proj"]]
+            layer_keys_llama_mlp_swiglu = [["mlp.swiglu.w12"],
+                                           ["mlp.swiglu.w3"]]
             expect_keys_llama = [["lm_head"],
                                  ["model.norm"],
                                  ["model.embed_tokens"]]
@@ -167,6 +171,15 @@ class ExLlamaV2Config:
             if "max_sequence_length" in read_config: self.max_seq_len = read_config["max_sequence_length"]
             elif "max_position_embeddings" in read_config: self.max_seq_len = read_config["max_position_embeddings"]
 
+            rs = read_config.get("rope_scaling", None)
+            if rs and "factor" in rs:
+                factor = rs["factor"]
+                scaling_type = rs.get("type", None)
+                if scaling_type == "linear":
+                    self.scale_pos_emb = factor
+                # elif scaling_type == "yarn":
+                #     self.scale_alpha_value = factor
+
         # Model dimensions
 
         self.head_dim = self.hidden_size // self.num_attention_heads
@@ -188,6 +201,15 @@ class ExLlamaV2Config:
             with safe_open(st_file, framework = "pt", device = "cpu") as f:
                 for key in f.keys():
                     self.tensor_file_map[key] = st_file
+
+        # For loading checkpoints with fused MLP layers
+
+        if self.architecture == "Llama" or self.architecture == "Yi":
+            if "model.layers.0.mlp.down_proj.weight" not in self.tensor_file_map and \
+                "model.layers.0.mlp.swiglu.w12.weight" in self.tensor_file_map:
+                for x in layer_keys_llama_mlp: layer_keys.remove(x)
+                layer_keys += layer_keys_llama_mlp_swiglu
+                self.checkpoint_fused_mlp = True
 
         # Make sure we found all the layers we need
 
