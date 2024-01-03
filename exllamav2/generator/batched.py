@@ -113,7 +113,7 @@ class ExLlamaV2BatchedModelAsync(ExLlamaV2):
                 forward_inputs = []
                 forward_caches = []
                 for batch_id in batch_ids:
-                    input_ids, cache, preprocess_only = self._inputs[batch_id]
+                    input_ids, cache, preprocess_only = self._inputs.pop(batch_id)
                     if preprocess_only:
                         pre_ids.append(batch_id)
                         pre_inputs.append(input_ids)
