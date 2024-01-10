@@ -110,7 +110,7 @@ class ExLlamaV2Linear(ExLlamaV2Module):
         return self.out_features * self.model.config.max_input_len * self.model.config.max_batch_size * 4 + 128
 
 
-    def forward(self, hidden_states, cache = None, attn_mask = None, past_len = None, intermediates = False, loras = None, force_recons = False, force_cuda = False, position_offsets = None):
+    def forward(self, hidden_states, cache = None, attn_params = None, past_len = None, intermediates = False, loras = None, force_recons = False, force_cuda = False):
 
         # Linear forward
 
@@ -201,3 +201,16 @@ class ExLlamaV2Linear(ExLlamaV2Module):
     def is_quant(self):
 
         return self.q_handle is not None
+
+
+    def rank_reduce(self, k):
+
+        assert not self.is_quant(), "Can't rank-reduce quantized layer"
+
+        weight = self.linear.weight.data.float()
+        max_rank = min(weight.shape[0], weight.shape[1])
+        desired_rank = int(max_rank * k)
+        results = torch.svd_lowrank(weight, q = desired_rank, niter = 10)
+        weight_approx = results[0] @ torch.diag(results[1]) @ results[2].T
+
+        self.linear.weight = nn.Parameter(weight_approx.half())

@@ -158,14 +158,14 @@ class ExLlamaV2MLP(ExLlamaV2Module):
         self.down_proj.set_device_idx(idx)
 
 
-    def forward(self, hidden_states, cache = None, attn_mask = None, past_len = None, intermediates = False, loras = None, position_offsets = None):
+    def forward(self, hidden_states, cache = None, attn_params = None, past_len = None, intermediates = False, loras = None):
         # global catch_key
         #
         # if self.key == catch_key:
-        #     return self.forward_torch(hidden_states, cache, attn_mask, intermediates, loras = loras)
+        #     return self.forward_torch(hidden_states, cache, attn_params, intermediates, loras = loras)
 
         if self.q_handle is None or intermediates:
-            return self.forward_torch(hidden_states, cache, attn_mask, intermediates, loras = loras)
+            return self.forward_torch(hidden_states, cache, attn_params, intermediates, loras = loras)
 
         if loras is None or self.temp_lora_size == 0:
             pass_loras = []
@@ -182,7 +182,7 @@ class ExLlamaV2MLP(ExLlamaV2Module):
         return hidden_states
 
 
-    def forward_torch(self, hidden_states, cache = None, attn_mask = None, intermediates = False, loras = None, position_offsets = None):
+    def forward_torch(self, hidden_states, cache = None, attn_params = None, intermediates = False, loras = None, position_offsets = None):
 
         residual = hidden_states
         post_norm = self.post_attention_layernorm.forward(hidden_states)
@@ -198,10 +198,10 @@ class ExLlamaV2MLP(ExLlamaV2Module):
 
         if intermediates:
             return {"post_norm": post_norm,
-                    "gate": gate,
-                    "up": up,
+                    # "gate": gate,
+                    # "up": up,
                     "pre_down": y,
-                    "down": down,
+                    # "down": down,
                     "hidden_states": hidden_states}
         else:
             return hidden_states
@@ -231,5 +231,13 @@ class ExLlamaV2MLP(ExLlamaV2Module):
 
     def is_quant(self):
         return self.q_handle is not None
+
+
+    def rank_reduce(self, k):
+
+        self.gate_proj.rank_reduce(k)
+        self.up_proj.rank_reduce(k)
+        self.down_proj.rank_reduce(k)
+
 
 
