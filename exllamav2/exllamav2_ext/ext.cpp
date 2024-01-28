@@ -17,12 +17,14 @@
 #include "cuda/q_mlp.cuh"
 #include "cuda/q_gemm.cuh"
 #include "cuda/rms_norm.cuh"
+#include "cuda/layer_norm.cuh"
 #include "cuda/rope.cuh"
 #include "cuda/cache.cuh"
 #include "cuda/h_gemm.cuh"
 
 #include "cpp/quantize_func.h"
 #include "cpp/sampling.h"
+#include "cpp/safetensors.h"
 
 #include "cpp/util.h"
 
@@ -308,6 +310,8 @@ void gemm_half_q_half
 uintptr_t make_q_attn
 (
     torch::Tensor layernorm,
+    torch::Tensor layernorm_bias,
+    bool layernorm_is_rms,
     float norm_epsilon,
     uintptr_t q_q_proj,
     uintptr_t q_k_proj,
@@ -341,6 +345,8 @@ uintptr_t make_q_attn
     QAttn* attn = new QAttn
     (
         (half*) layernorm.is_meta() ? NULL : (half*) layernorm.data_ptr(),
+        (half*) layernorm_bias.is_meta() ? NULL : (half*) layernorm_bias.data_ptr(),
+        layernorm_is_rms,
         norm_epsilon,
         qm_q_proj,
         qm_k_proj,
@@ -508,6 +514,8 @@ int q_attn_set_loras
 uintptr_t make_q_mlp
 (
     torch::Tensor layernorm,
+    torch::Tensor layernorm_bias,
+    bool layernorm_is_rms,
     float norm_epsilon,
     uintptr_t q_gate,
     uintptr_t q_up,
@@ -529,7 +537,9 @@ uintptr_t make_q_mlp
 
     QMLP* mlp = new QMLP
     (
-        (half*) layernorm.data_ptr(),
+        (half*) layernorm.is_meta() ? NULL : (half*) layernorm.data_ptr(),
+        (half*) layernorm_bias.is_meta() ? NULL : (half*) layernorm_bias.data_ptr(),
+        layernorm_is_rms,
         norm_epsilon,
         qm_gate,
         qm_up,
@@ -634,6 +644,8 @@ int q_mlp_set_loras
 uintptr_t make_q_moe_mlp
 (
     torch::Tensor layernorm,
+    torch::Tensor layernorm_bias,
+    bool layernorm_is_rms,
     float norm_epsilon,
     torch::Tensor gate,
     int num_experts,
@@ -669,7 +681,9 @@ uintptr_t make_q_moe_mlp
 
     QMoEMLP* moe_mlp = new QMoEMLP
     (
-        (half*) layernorm.data_ptr(),
+        (half*) layernorm.is_meta() ? NULL : (half*) layernorm.data_ptr(),
+        (half*) layernorm_bias.is_meta() ? NULL : (half*) layernorm_bias.data_ptr(),
+        layernorm_is_rms,
         norm_epsilon,
         (half*) gate.data_ptr(),
         num_experts,
@@ -861,6 +875,56 @@ void rms_norm_
 )
 {
     rms_norm(x, w, x, epsilon);
+}
+
+
+// Layernorm
+
+void layer_norm
+(
+    torch::Tensor x,
+    torch::Tensor w,
+    torch::Tensor b,
+    torch::Tensor y,
+    float epsilon
+)
+{
+    TORCH_CHECK_DTYPE(x, kHalf);
+    TORCH_CHECK_DTYPE(w, kHalf);
+    TORCH_CHECK_DTYPE_OPT(b, kHalf);
+    TORCH_CHECK_DTYPE(y, kHalf);
+    TORCH_CHECK_SHAPES(x, 1, w, 0, 1);
+    TORCH_CHECK_SHAPES(x, 1, w, 0, 1);
+    TORCH_CHECK_SHAPES(x, 0, y, 0, 1);
+    TORCH_CHECK_SHAPES(x, 1, y, 1, 1);
+    TORCH_CHECK_SHAPES_OPT(w, 0, b, 0, 1);
+
+    int rows = x.size(0);
+    int dim = x.size(1);
+
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(x));
+
+    layer_norm_cuda
+    (
+        (half*) x.data_ptr(),
+        (half*) w.data_ptr(),
+        b.device().is_meta() ? NULL : (half*) b.data_ptr(),
+        (half*) y.data_ptr(),
+        epsilon,
+        rows,
+        dim
+    );
+}
+
+void layer_norm_
+(
+    torch::Tensor x,
+    torch::Tensor w,
+    torch::Tensor b,
+    float epsilon
+)
+{
+    layer_norm(x, w, b, x, epsilon);
 }
 
 
@@ -1259,6 +1323,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("gemm_half_q_half", &gemm_half_q_half, "gemm_half_q_half");
     m.def("rms_norm", &rms_norm, "rms_norm");
     m.def("rms_norm_", &rms_norm_, "rms_norm_");
+    m.def("layer_norm", &layer_norm, "layer_norm");
+    m.def("layer_norm_", &layer_norm_, "layer_norm_");
     m.def("rope_", &rope_, "rope_");
     m.def("apply_rep_penalty", &apply_rep_penalty, "apply_rep_penalty");
 //    m.def("apply_freq_penalty", &apply_freq_penalty, "apply_freq_penalty");
@@ -1273,4 +1339,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("fast_copy_cpu", &fast_copy_cpu, "fast_copy_cpu");
 //    m.def("array_fp16_to_fp8_ref", &array_fp16_to_fp8_ref, "array_fp16_to_fp8_ref");
 //    m.def("array_fp8_to_fp16_ref", &array_fp8_to_fp16_ref, "array_fp8_to_fp16_ref");
+    m.def("safetensors_open", &safetensors_open, "safetensors_open");
+    m.def("safetensors_close", &safetensors_close, "safetensors_close");
+    m.def("safetensors_load", &safetensors_load, "safetensors_load");
+    m.def("safetensors_pinned_buffer", &safetensors_pinned_buffer, "safetensors_pinned_buffer");
+    m.def("safetensors_free_pinned_buffer", &safetensors_free_pinned_buffer, "safetensors_free_pinned_buffer");
 }

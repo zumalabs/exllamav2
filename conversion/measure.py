@@ -5,7 +5,8 @@ from exllamav2.model import \
     ExLlamaV2MLP,
     ExLlamaV2MoEMLP,
     ExLlamaV2Linear,
-    ExLlamaV2RMSNorm
+    ExLlamaV2RMSNorm,
+    ExLlamaV2LayerNorm
 )
 
 from safetensors import safe_open
@@ -100,10 +101,10 @@ def test_error(module, hidden_states, target_states, cache, attn_params):
         xtest = module.forward(x, cache, attn_params)
         xtest = xtest[0].float()
         xref = xref[0].float()
-        rfn_sum += torch.linalg.norm(xtest - xref, 'fro') / torch.linalg.norm(xref, 'fro')
+        rfn_sum += (torch.linalg.norm(xtest - xref, 'fro') / torch.linalg.norm(xref, 'fro')).item()
         rfn_count += 1
 
-    return max(1e-6, 1 - (rfn_sum / rfn_count)).item()
+    return max(1e-6, 1 - (rfn_sum / rfn_count))
 
 
 def measure_attn(module, hidden_states, target_states, quantizers, cache, attn_params):
@@ -331,7 +332,7 @@ def measure_quant(job, save_fn, model):
             mode = "linear"
             # Don't measure head layer
 
-        elif isinstance(module, ExLlamaV2RMSNorm):
+        elif isinstance(module, ExLlamaV2RMSNorm) or isinstance(module, ExLlamaV2LayerNorm):
             mode = "norm"
 
         # Reference forward pass

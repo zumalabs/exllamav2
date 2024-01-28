@@ -5,7 +5,8 @@ from exllamav2.model import \
     ExLlamaV2MLP,
     ExLlamaV2MoEMLP,
     ExLlamaV2Linear,
-    ExLlamaV2RMSNorm
+    ExLlamaV2RMSNorm,
+    ExLlamaV2LayerNorm
 )
 
 from safetensors import safe_open
@@ -263,8 +264,9 @@ def quant(job, save_fn, model):
             assert module.key == "lm_head"
             quantizers["lm_head"] = AdaptiveGPTQ(module.linear)
 
-        elif isinstance(module, ExLlamaV2RMSNorm):
+        elif isinstance(module, ExLlamaV2RMSNorm) or isinstance(module, ExLlamaV2LayerNorm):
             mode = "norm"
+
 
         # Reference forward pass
 
@@ -408,7 +410,7 @@ def quant(job, save_fn, model):
 
             if mode != "linear":
                 save_dict = {f"row.{idx:05}": h for idx, h in enumerate(hidden_states)}
-                # save_dict |= {f"i_row.{idx:05}": h for idx, h in enumerate(hidden_i_states)}
+                # save_dict.update( {f"i_row.{idx:05}": h for idx, h in enumerate(hidden_i_states)} )
                 save_file(save_dict, temp_filename)
                 save_dict = None
 

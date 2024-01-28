@@ -116,6 +116,7 @@ if build_jit:
         "cuda/q_mlp.cu",
         "cuda/q_gemm.cu",
         "cuda/rms_norm.cu",
+        "cuda/layer_norm.cu",
         "cuda/rope.cu",
         "cuda/cache.cu",
         "cuda/util.cu",
@@ -130,7 +131,8 @@ if build_jit:
         "cuda/comp_units/unit_exl2_3a.cu",
         "cuda/comp_units/unit_exl2_3b.cu",
         "cpp/quantize_func.cpp",
-        "cpp/sampling.cpp"
+        "cpp/sampling.cpp",
+        "cpp/safetensors.cpp"
     ]
 
     sources = [os.path.join(sources_dir, s) for s in sources_]

@@ -18,6 +18,7 @@ from exllamav2.cache import ExLlamaV2CacheBase
 from exllamav2.linear import ExLlamaV2Linear
 from exllamav2.module import ExLlamaV2Module
 from exllamav2.rmsnorm import ExLlamaV2RMSNorm
+from exllamav2.layernorm import ExLlamaV2LayerNorm
 from exllamav2.attn import ExLlamaV2Attention
 from exllamav2.lora import ExLlamaV2Lora
 from exllamav2.mlp import ExLlamaV2MLP
@@ -25,6 +26,7 @@ from exllamav2.moe_mlp import ExLlamaV2MoEMLP
 from exllamav2.embedding import ExLlamaV2Embedding
 # from exllamav2.util import list_live_tensors, print_vram_usage, set_snapshot, diff_snapshot, print_vram_usage_peak
 from exllamav2.compat import safe_move_tensor
+from exllamav2.fasttensors import cleanup_stfiles
 import gc
 
 def _torch_device(idx):
@@ -140,8 +142,10 @@ class ExLlamaV2:
                 self.modules.append(ExLlamaV2MLP(self, f"model.layers.{layer_idx}", layer_idx))
             for m in self.modules[-1].submodules: self.modules_dict[m.key] = m
 
-
-        self.modules.append(ExLlamaV2RMSNorm(self, "model.norm"))
+        if self.config.architecture == "Orion":
+            self.modules.append(ExLlamaV2LayerNorm(self, "model.norm"))
+        else:
+            self.modules.append(ExLlamaV2RMSNorm(self, "model.norm"))
         self.modules_dict[self.modules[-1].key] = self.modules[-1]
 
         self.head_layer_idx = len(self.modules)
@@ -243,6 +247,7 @@ class ExLlamaV2:
         f = self.load_gen(gpu_split, lazy, stats, callback, callback_gen)
         for item in f: return item
 
+
     def load_gen(self, gpu_split = None, lazy = False, stats = False, callback = None, callback_gen = None):
 
         with torch.inference_mode():
@@ -268,6 +273,8 @@ class ExLlamaV2:
             self.set_cache_map()
 
             self.loaded = True
+            cleanup_stfiles()
+
             if stats: yield gpu_split, stats_
             else: yield gpu_split
 
@@ -409,6 +416,7 @@ class ExLlamaV2:
             gc.collect()
             torch.cuda.empty_cache()
             self.loaded = True
+            cleanup_stfiles()
 
         if 'yield' in locals():
             yield

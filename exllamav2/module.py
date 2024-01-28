@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from exllamav2.config import ExLlamaV2Config
+from exllamav2.fasttensors import STFile
 from safetensors import safe_open
-
 
 def _torch_device(idx):
     if idx == -1: return "cpu"
@@ -69,12 +69,19 @@ class ExLlamaV2Module:
             submap_i[v].append(k)
 
         for v, ks in submap_i.items():
-            with safe_open(v, framework="pt", device="cpu") as st:
-                for k in ks:
-                    if measure:
-                        size += _tsize(st, key + "." + k)
-                    else:
-                        tensors[k] = st.get_tensor(key + "." + k).to(self.device())
+            stfile = STFile.open(v, fast = self.model.config.fasttensors)
+            for k in ks:
+                if measure:
+                    size += stfile.measure(key + "." + k)
+                else:
+                    tensors[k] = stfile.get_tensor(key + "." + k, device = self.device())
+
+            # with safe_open(v, framework="pt", device="cpu") as st:
+            #     for k in ks:
+            #         if measure:
+            #             size += _tsize(st, key + "." + k)
+            #         else:
+            #             tensors[k] = st.get_tensor(key + "." + k).to(self.device())
 
         return size if measure else tensors
 
@@ -100,9 +107,15 @@ class ExLlamaV2Module:
         # Torch
 
         if key + ".weight" in self.model.config.tensor_file_map:
-            tensor = self.load_multi(["weight"], override_key = override_key)["weight"]
-            tensor = tensor.half()
-            return nn.Parameter(tensor)
+            if key + ".bias" in self.model.config.tensor_file_map:
+                tensors = self.load_multi(["weight", "bias"], override_key = override_key)
+                tensor = tensors["weight"].half()
+                bias = tensors["bias"].half()
+                return nn.Parameter(tensor), nn.Parameter(bias)
+            else:
+                tensors = self.load_multi(["weight"], override_key = override_key)
+                tensor = tensors["weight"].half()
+                return nn.Parameter(tensor)
 
         # No weights found for key
 
