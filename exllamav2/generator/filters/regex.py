@@ -5,19 +5,19 @@ from exllamav2 import (
 
 from exllamav2.generator.filters.base import ExLlamaV2Filter
 import functools
-import re
+import regex
 
 
-@functools.lru_cache(maxsize=1000000)
-def filter_tokens(branch_str, char_trie, pattern):
-    pass_tokens = set()
-    for c in char_trie.children:
-        w = char_trie.children[c]
-        if re.fullmatch(pattern, branch_str + c):
-            if len(w.leaf) > 0:
-                pass_tokens.update(w.leaf)
-            pass_tokens.update(filter_tokens(branch_str + c, w, pattern))
-    return pass_tokens
+# @functools.lru_cache(maxsize=1000000)
+# def filter_tokens(branch_str, char_trie, pattern):
+#     pass_tokens = set()
+#     for c in char_trie.children:
+#         w = char_trie.children[c]
+#         if pattern.fullmatch(branch_str + c, partial=True):
+#             if len(w.leaf) > 0:
+#                 pass_tokens.update(w.leaf)
+#             pass_tokens.update(filter_tokens(branch_str + c, w, pattern))
+#     return pass_tokens
 
 
 class ExLlamaV2RegexFilter(ExLlamaV2Filter):
@@ -27,7 +27,7 @@ class ExLlamaV2RegexFilter(ExLlamaV2Filter):
 
     def __init__(self, model, tokenizer, pattern):
         super().__init__(model, tokenizer)
-        self.pattern = pattern
+        self.pattern = regex.compile(pattern)
 
 
     def begin(self, prefix_str = ""):
@@ -44,7 +44,7 @@ class ExLlamaV2RegexFilter(ExLlamaV2Filter):
     def filter_tokens(self, branch_str, char_trie, pass_tokens):
         for c in char_trie.children:
             w = char_trie.children[c]
-            if re.fullmatch(self.pattern, branch_str + c):
+            if self.pattern.fullmatch(branch_str + c, partial=True):
                 if len(w.leaf) > 0:
                     pass_tokens.update(w.leaf)
                 self.filter_tokens(branch_str + c, w, pass_tokens)
